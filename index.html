@@ -4,9 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sunbridge Human Academy ERP</title>
-  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Supabase JS Client -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body class="bg-gray-100 font-sans min-h-screen p-4 md:p-8">
@@ -19,20 +17,20 @@
     </header>
 
     <!-- Login Form -->
-    <div id="login-box" class="space-y-4 max-w-md mx-auto py-6">
+    <form id="login-box" onsubmit="handleLogin(event)" class="space-y-4 max-w-md mx-auto py-6">
       <h2 class="text-xl font-semibold text-gray-700 text-center">Super Admin Access</h2>
       <div>
         <label class="block text-sm font-medium text-gray-600 mb-1">Email Address</label>
-        <input id="email" type="email" placeholder="admin@sunbridge.edu" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+        <input id="email" type="email" required placeholder="admin@sunbridge.edu" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-600 mb-1">Password</label>
-        <input id="password" type="password" placeholder="••••••••" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+        <input id="password" type="password" required placeholder="••••••••" class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
       </div>
-      <button onclick="login()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors">Log In</button>
-    </div>
+      <button type="submit" id="login-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-lg transition-colors">Log In</button>
+    </form>
 
-    <!-- Admin Panel (Hidden until login) -->
+    <!-- Dashboard Panel (Hidden by default, shown after login) -->
     <div id="admin-box" class="hidden space-y-8">
       <!-- User Info Bar -->
       <div class="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
