@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Staff & Salary Management - Sunbridge ERP</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    @media print {
+      body * { visibility: hidden; }
+      #printable-payslip, #printable-payslip * { visibility: visible; }
+      #printable-payslip { position: absolute; left: 0; top: 0; width: 100%; }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 font-sans min-h-screen">
+  <header class="bg-emerald-900 text-white shadow-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 flex justify-between items-center h-16">
+      <span class="text-xl font-bold">Sunbridge ERP</span>
+      <nav class="flex space-x-4 text-sm font-medium">
+        <a href="dashboard.html" class="hover:bg-emerald-800 px-3 py-2 rounded-md">Dashboard</a>
+        <a href="staff.html" class="bg-emerald-800 px-3 py-2 rounded-md">Staff & Payroll</a>
+        <a href="finance.html" class="hover:bg-emerald-800 px-3 py-2 rounded-md">Finance</a>
+        <button onclick="logout()" class="bg-red-600 hover:bg-red-700 px-3 py-2 rounded-md">Logout</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-8">
+    <div class="flex justify-between items-center mb-6">
+      <h1 class="text-2xl font-bold">Staff & Automated Payroll</h1>
+      <button onclick="toggleModal('paySalaryModal', true)" class="bg-emerald-800 text-white px-4 py-2 rounded-lg text-sm font-medium">Disburse Salary & Issue Payslip</button>
+    </div>
+
+    <!-- PAYROLL HISTORY TABLE -->
+    <div class="bg-white rounded-xl border shadow-sm overflow-hidden mb-8">
+      <div class="px-6 py-4 border-b font-bold text-gray-800">Monthly Salary Payment Ledger</div>
+      <table class="w-full text-left text-sm">
+        <tr class="bg-gray-50 border-b text-xs text-gray-500 uppercase">
+          <th class="p-4">Tx Reference</th>
+          <th class="p-4">Staff Member</th>
+          <th class="p-4">Month/Year</th>
+          <th class="p-4">Amount Paid</th>
+          <th class="p-4 text-center">Payslip</th>
+        </tr>
+        <tbody id="payroll-ledger-body"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- PAY SALARY MODAL -->
+  <div id="paySalaryModal" class="fixed inset-0 bg-black/50 hidden z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+      <h3 class="text-lg font-bold">Process Salary Disbursement</h3>
+      <form onsubmit="return processSalaryPayment(event);" class="space-y-4">
+        <div>
+          <label class="text-xs font-semibold">Select Staff</label>
+          <select id="salary-staff-select" required class="w-full p-2 border rounded-lg text-sm"></select>
+        </div>
+        <div>
+          <label class="text-xs font-semibold">Salary Month / Year</label>
+          <input id="salary-period" type="text" placeholder="e.g. August 2026" required class="w-full p-2 border rounded-lg text-sm">
+        </div>
+        <div>
+          <label class="text-xs font-semibold">Net Salary Amount ($)</label>
+          <input id="salary-amount" type="number" step="0.01" required placeholder="0.00" class="w-full p-2 border rounded-lg text-sm">
+        </div>
+        <div class="flex justify-end space-x-2 pt-2">
+          <button type="button" onclick="toggleModal('paySalaryModal', false)" class="px-4 py-2 text-sm text-gray-600">Cancel</button>
+          <button type="submit" id="process-salary-btn" class="px-4 py-2 bg-emerald-800 text-white rounded-lg text-sm font-medium">Pay & Auto-Generate Expense</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- PRINTABLE PAYSLIP TEMPLATE -->
+  <div id="printable-payslip" class="hidden p-8 bg-white max-w-xl mx-auto border my-6">
+    <div class="text-center border-b pb-4 mb-4">
+      <h2 class="text-2xl font-black">SUNBRIDGE ACADEMY</h2>
+      <p class="text-xs text-gray-500">Official Monthly Employee Payslip</p>
+    </div>
+    <div class="grid grid-cols-2 gap-4 text-xs mb-4">
+      <div>Tx Ref: <strong id="ps-tx-ref"></strong></div>
+      <div>Pay Period: <strong id="ps-period"></strong></div>
+      <div>Employee Name: <strong id="ps-staff-name"></strong></div>
+      <div>Role/Title: <strong id="ps-staff-role"></strong></div>
+    </div>
+    <div class="border-t border-b py-3 mb-4 flex justify-between items-center text-sm">
+      <span class="font-bold">Total Disbursed Net Salary</span>
+      <span id="ps-amount" class="font-mono font-bold text-lg text-emerald-800">$0.00</span>
+    </div>
+    <div class="flex justify-between items-center pt-4">
+      <span class="text-[10px] text-gray-400">Linked Financial Expense Recorded Automatically</span>
+      <button onclick="window.print()" class="bg-gray-800 text-white text-xs px-3 py-1 rounded">Print Payslip</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
