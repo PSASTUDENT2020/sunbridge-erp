@@ -12,47 +12,74 @@ let allStudentsCache = [];
 // ==========================================
 async function checkAuthPage() {
   const { data: { session } } = await supabase.auth.getSession();
-  const currentPath = window.location.pathname;
+  
+  // Cleanly extract current filename to prevent local server loop issues
+  const currentPath = window.location.pathname.toLowerCase();
+  const isLoginPage = currentPath === '' || 
+                      currentPath === '/' || 
+                      currentPath.endsWith('index.html') || 
+                      currentPath.endsWith('/');
 
-  if (!session && !currentPath.endsWith('index.html') && currentPath !== '/' && currentPath !== '') {
-    window.location.href = 'index.html';
-  } else if (session && (currentPath.endsWith('index.html') || currentPath === '/' || currentPath === '')) {
-    window.location.href = 'dashboard.html';
+  if (!session && !isLoginPage) {
+    window.location.assign('index.html');
+  } else if (session && isLoginPage) {
+    window.location.assign('dashboard.html');
   } else if (session) {
     loadGlobalBranding();
   }
 }
 
 async function login(event) {
-  if (event) event.preventDefault();
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
 
-  const email = document.getElementById('email').value.trim();
-  const password = document.getElementById('password').value;
+  const emailEl = document.getElementById('email');
+  const passwordEl = document.getElementById('password');
   const loginBtn = document.getElementById('login-btn');
+
+  if (!emailEl || !passwordEl) return false;
+
+  const email = emailEl.value.trim();
+  const password = passwordEl.value;
 
   if (!email || !password) {
     alert("Please enter both email and password.");
-    return;
+    return false;
   }
 
-  loginBtn.innerText = "Logging in...";
-  loginBtn.disabled = true;
+  try {
+    if (loginBtn) {
+      loginBtn.innerText = "Logging in...";
+      loginBtn.disabled = true;
+    }
 
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
 
-  loginBtn.innerText = "Log In";
-  loginBtn.disabled = false;
-
-  if (error) {
-    alert("Login Error: " + error.message);
-  } else {
-    window.location.href = 'dashboard.html';
+    if (error) {
+      alert("Login Error: " + error.message);
+      if (loginBtn) {
+        loginBtn.innerText = "Log In";
+        loginBtn.disabled = false;
+      }
+    } else if (data?.session) {
+      window.location.assign('dashboard.html');
+    }
+  } catch (err) {
+    alert("Unexpected Error: " + err.message);
+    if (loginBtn) {
+      loginBtn.innerText = "Log In";
+      loginBtn.disabled = false;
+    }
   }
+
+  return false;
 }
 
 async function logout() {
   await supabase.auth.signOut();
-  window.location.href = 'index.html';
+  window.location.assign('index.html');
 }
 
 // ==========================================
@@ -70,7 +97,6 @@ async function loadGlobalBranding() {
       logoEl.classList.remove('hidden');
     }
 
-    // Set preview name in printable voucher if present
     const pvSchoolName = document.getElementById('pv-school-name');
     if (pvSchoolName && data.school_name) pvSchoolName.innerText = data.school_name;
   }
@@ -80,7 +106,7 @@ async function loadGlobalBranding() {
 // 4. SCHOOL SETTINGS & LOGO UPLOAD
 // ==========================================
 async function loadSchoolSettingsForm() {
-  const { data, error } = await supabase.from('school_settings').select('*').limit(1).single();
+  const { data } = await supabase.from('school_settings').select('*').limit(1).single();
   
   if (data) {
     const nameInput = document.getElementById('set-name');
@@ -124,7 +150,7 @@ async function saveSchoolSettings(event) {
     const fileExt = file.name.split('.').pop();
     const filePath = `logo-${Date.now()}.${fileExt}`;
 
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabase.storage
       .from('school-assets')
       .upload(filePath, file, { cacheControl: '3600', upsert: true });
 
