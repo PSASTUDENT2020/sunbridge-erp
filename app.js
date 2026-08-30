@@ -1,419 +1,369 @@
-// ==========================================
-// 1. SUPABASE INITIALIZATION
-// ==========================================
-const SUPABASE_URL = 'https://wscaiebgqxgtfbisamyc.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_NSF28nhImZqYL9_3RUTmFg_yDANCLr6';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+/* ==========================================================================
+   SUNBRIDGE ERP - MASTER APPLICATION ENGINE (app.js)
+   ========================================================================== */
 
-let allStudentsCache = [];
+// --- 1. SUPABASE CLIENT INITIALIZATION ---
+const SUPABASE_URL = "https://yluiejaiscltnjlmiruo.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_tLoxhnZTNHezgc2pLDKTVA_YsYR7IT3";
 
-// ==========================================
-// 2. AUTHENTICATION & PAGE GUARD
-// ==========================================
-async function checkAuthPage() {
-  const { data: { session } } = await supabase.auth.getSession();
-  
-  // Cleanly extract current filename to prevent local server loop issues
-  const currentPath = window.location.pathname.toLowerCase();
-  const isLoginPage = currentPath === '' || 
-                      currentPath === '/' || 
-                      currentPath.endsWith('index.html') || 
-                      currentPath.endsWith('/');
+// Fallback initialization if library is loaded on page
+const supabase = window.supabase 
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY) 
+  : null;
 
-  if (!session && !isLoginPage) {
-    window.location.assign('index.html');
-  } else if (session && isLoginPage) {
-    window.location.assign('dashboard.html');
-  } else if (session) {
-    loadGlobalBranding();
-  }
+// --- 2. GLOBAL ROUTING & AUTHENTICATION HELPER ---
+function goTo(page) {
+  window.location.href = page;
 }
 
+// Global Auth Check (Runs automatically on protected pages)
+async function checkAuth(requiredRole = null) {
+  if (!supabase) return null;
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    if (!window.location.pathname.endsWith('index.html') && window.location.pathname !== '/') {
+      window.location.href = 'index.html';
+    }
+    return null;
+  }
+
+  // Fetch Role Profile
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single();
+
+  if (requiredRole && profile && profile.role !== requiredRole && profile.role !== 'admin') {
+    alert("Unauthorized access. Redirecting...");
+    window.location.href = 'dashboard.html';
+    return null;
+  }
+
+  return { user, profile };
+}
+
+// Global Logout Action
+async function logout() {
+  if (supabase) {
+    await supabase.auth.signOut();
+  }
+  window.location.href = 'index.html';
+}
+
+// --- 3. INDEX.HTML (AUTHENTICATION & LOGIN) ---
 async function login(event) {
-  if (event) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
+  event.preventDefault();
 
-  const emailEl = document.getElementById('email');
-  const passwordEl = document.getElementById('password');
-  const loginBtn = document.getElementById('login-btn');
+  const emailInput = document.getElementById('email');
+  const passwordInput = document.getElementById('password');
+  const btn = document.getElementById('login-btn');
 
-  if (!emailEl || !passwordEl) return false;
+  if (!emailInput || !passwordInput) return false;
 
-  const email = emailEl.value.trim();
-  const password = passwordEl.value;
+  const email = emailInput.value.trim();
+  const password = passwordInput.value.trim();
 
-  if (!email || !password) {
-    alert("Please enter both email and password.");
-    return false;
-  }
+  btn.innerText = "Authenticating...";
+  btn.disabled = true;
 
   try {
-    if (loginBtn) {
-      loginBtn.innerText = "Logging in...";
-      loginBtn.disabled = true;
-    }
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email,
+      password: password
+    });
 
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
 
-    if (error) {
-      alert("Login Error: " + error.message);
-      if (loginBtn) {
-        loginBtn.innerText = "Log In";
-        loginBtn.disabled = false;
-      }
-    } else if (data?.session) {
-      window.location.assign('dashboard.html');
+    // Check Role Redirection
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', data.user.id)
+      .single();
+
+    if (profile && profile.role === 'finance') {
+      window.location.href = 'finance.html';
+    } else {
+      window.location.href = 'dashboard.html';
     }
   } catch (err) {
-    alert("Unexpected Error: " + err.message);
-    if (loginBtn) {
-      loginBtn.innerText = "Log In";
-      loginBtn.disabled = false;
-    }
+    alert("Login failed: " + err.message);
+    btn.innerText = "Log In";
+    btn.disabled = false;
   }
 
   return false;
 }
 
-async function logout() {
-  await supabase.auth.signOut();
-  window.location.assign('index.html');
-}
+// --- 4. DASHBOARD.HTML (EXECUTIVE OVERVIEW) ---
+async function loadExecutiveDashboard() {
+  const auth = await checkAuth();
+  if (!auth) return;
 
-// ==========================================
-// 3. GLOBAL BRANDING (Header Logo & Name)
-// ==========================================
-async function loadGlobalBranding() {
-  const { data } = await supabase.from('school_settings').select('*').limit(1).single();
-  if (data) {
-    const nameEl = document.getElementById('header-school-name');
-    const logoEl = document.getElementById('header-logo');
+  try {
+    const [studentsCount, staffCount, vouchers, expenses] = await Promise.all([
+      getCount('students'),
+      getCount('staff'),
+      supabase.from('vouchers').select('total_amount, status'),
+      supabase.from('expenses').select('amount')
+    ]);
 
-    if (nameEl && data.school_name) nameEl.innerText = data.school_name;
-    if (logoEl && data.logo_url) {
-      logoEl.src = data.logo_url;
-      logoEl.classList.remove('hidden');
+    // Update Student & Staff counters
+    const sElem = document.getElementById('dash-students');
+    const stElem = document.getElementById('dash-staff');
+    if (sElem) sElem.innerText = studentsCount;
+    if (stElem) stElem.innerText = staffCount;
+
+    // Calculate Receivables
+    if (vouchers.data) {
+      const pending = vouchers.data
+        .filter(v => v.status === 'Unpaid')
+        .reduce((sum, v) => sum + (parseFloat(v.total_amount) || 0), 0);
+      const rElem = document.getElementById('dash-receivables');
+      if (rElem) rElem.innerText = `$${pending.toFixed(2)}`;
     }
 
-    const pvSchoolName = document.getElementById('pv-school-name');
-    if (pvSchoolName && data.school_name) pvSchoolName.innerText = data.school_name;
+    // Calculate Payroll / Expenses
+    if (expenses.data) {
+      const totalExp = expenses.data.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+      const eElem = document.getElementById('dash-expenses');
+      if (eElem) eElem.innerText = `$${totalExp.toFixed(2)}`;
+    }
+  } catch (err) {
+    console.error("Error loading dashboard metrics:", err);
   }
 }
 
-// ==========================================
-// 4. SCHOOL SETTINGS & LOGO UPLOAD
-// ==========================================
-async function loadSchoolSettingsForm() {
-  const { data } = await supabase.from('school_settings').select('*').limit(1).single();
-  
-  if (data) {
-    const nameInput = document.getElementById('set-name');
-    const phoneInput = document.getElementById('set-phone');
-    const emailInput = document.getElementById('set-email');
-    const addressInput = document.getElementById('set-address');
-    const previewImg = document.getElementById('current-logo-preview');
-
-    if (nameInput) nameInput.value = data.school_name || '';
-    if (phoneInput) phoneInput.value = data.phone || '';
-    if (emailInput) emailInput.value = data.email || '';
-    if (addressInput) addressInput.value = data.address || '';
-    
-    if (previewImg && data.logo_url) {
-      previewImg.src = data.logo_url;
-      previewImg.classList.remove('hidden');
-    }
-
-    loadGlobalBranding();
-  }
+async function getCount(tableName) {
+  const { count, error } = await supabase
+    .from(tableName)
+    .select('*', { count: 'exact', head: true });
+  return error ? 0 : (count || 0);
 }
 
-async function saveSchoolSettings(event) {
-  event.preventDefault();
+// --- 5. STUDENTS.HTML (ROSTER & ENROLLMENT) ---
+async function loadStudentsPage() {
+  await checkAuth();
+  await populateAcademyDropdown('student-academy-select');
+  await fetchStudentsRoster();
+}
 
-  const name = document.getElementById('set-name').value;
-  const phone = document.getElementById('set-phone').value;
-  const email = document.getElementById('set-email').value;
-  const address = document.getElementById('set-address').value;
-  const fileInput = document.getElementById('set-logo-file');
+async function fetchStudentsRoster() {
+  const tbody = document.getElementById('students-table-body');
+  if (!tbody) return;
 
-  const btn = document.getElementById('save-settings-btn');
-  btn.innerText = "Saving & Uploading...";
-  btn.disabled = true;
-
-  const { data: current } = await supabase.from('school_settings').select('id, logo_url').limit(1).single();
-  let logoUrl = current?.logo_url || '';
-
-  if (fileInput.files.length > 0) {
-    const file = fileInput.files[0];
-    const fileExt = file.name.split('.').pop();
-    const filePath = `logo-${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('school-assets')
-      .upload(filePath, file, { cacheControl: '3600', upsert: true });
-
-    if (uploadError) {
-      alert("Logo Upload Error: " + uploadError.message);
-      btn.innerText = "Save Changes";
-      btn.disabled = false;
-      return;
-    }
-
-    const { data: publicUrlData } = supabase.storage
-      .from('school-assets')
-      .getPublicUrl(filePath);
-
-    logoUrl = publicUrlData.publicUrl;
-  }
-
-  const { error } = await supabase.from('school_settings').update({
-    school_name: name,
-    phone: phone,
-    email: email,
-    address: address,
-    logo_url: logoUrl,
-    updated_at: new Date().toISOString()
-  }).eq('id', current.id);
-
-  btn.innerText = "Save Changes";
-  btn.disabled = false;
+  const { data, error } = await supabase
+    .from('students')
+    .select('*')
+    .order('created_at', { ascending: false });
 
   if (error) {
-    alert("Error updating settings: " + error.message);
-  } else {
-    alert("School details updated successfully!");
-    loadSchoolSettingsForm();
-  }
-}
-
-// ==========================================
-// 5. ACADEMIES & FINANCE OFFICERS
-// ==========================================
-async function loadAcademiesList() {
-  const tableBody = document.getElementById('academies-table-body');
-  if (!tableBody) return;
-
-  const { data, error } = await supabase.from('academies').select('*').order('created_at', { ascending: false });
-
-  if (error) {
-    tableBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Error: ${error.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-red-500">Error loading roster.</td></tr>`;
     return;
   }
 
   if (!data || data.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-400">No branches added yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-gray-400 text-center">No students registered yet.</td></tr>`;
     return;
   }
 
-  tableBody.innerHTML = data.map(branch => `
-    <tr class="border-b hover:bg-gray-50">
-      <td class="p-3 font-medium text-gray-800">${branch.name}</td>
-      <td class="p-3"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-md font-mono">${branch.code}</span></td>
-      <td class="p-3">${branch.finance_person_name || '<span class="text-gray-400">Unassigned</span>'}</td>
-      <td class="p-3 text-xs">
-        <div>${branch.finance_person_email || ''}</div>
-        <div class="text-gray-400">${branch.finance_person_phone || ''}</div>
-      </td>
+  tbody.innerHTML = data.map(s => `
+    <tr class="border-b hover:bg-gray-50 transition">
+      <td class="p-3 font-mono font-bold text-gray-700">${s.roll_number || '-'}</td>
+      <td class="p-3 font-medium text-gray-900">${s.full_name}</td>
+      <td class="p-3 text-gray-600">${s.grade_class || '-'}</td>
+      <td class="p-3 text-gray-600">${s.guardian_phone || '-'}</td>
     </tr>
   `).join('');
-}
-
-async function saveAcademy(event) {
-  event.preventDefault();
-
-  const name = document.getElementById('academy-name').value.trim();
-  const code = document.getElementById('academy-code').value.trim();
-  const financeName = document.getElementById('finance-name').value.trim();
-  const financeEmail = document.getElementById('finance-email').value.trim();
-  const financePhone = document.getElementById('finance-phone').value.trim();
-
-  const btn = document.getElementById('save-academy-btn');
-  btn.innerText = "Saving...";
-  btn.disabled = true;
-
-  const { error } = await supabase.from('academies').insert([{
-    name: name,
-    code: code,
-    finance_person_name: financeName,
-    finance_person_email: financeEmail,
-    finance_person_phone: financePhone
-  }]);
-
-  btn.innerText = "Add Branch & Assign Finance";
-  btn.disabled = false;
-
-  if (error) {
-    alert("Error adding academy: " + error.message);
-  } else {
-    alert("Academy and finance officer added successfully!");
-    document.getElementById('academy-name').value = '';
-    document.getElementById('academy-code').value = '';
-    document.getElementById('finance-name').value = '';
-    document.getElementById('finance-email').value = '';
-    document.getElementById('finance-phone').value = '';
-    loadAcademiesList();
-  }
-}
-
-// ==========================================
-// 6. STUDENT MANAGEMENT
-// ==========================================
-async function loadAcademyDropdown() {
-  const select = document.getElementById('student-academy-select');
-  if (!select) return;
-
-  const { data, error } = await supabase.from('academies').select('id, name, code').order('name');
-
-  if (error || !data || data.length === 0) {
-    select.innerHTML = `<option value="">No academies found (Add one first)</option>`;
-    return;
-  }
-
-  select.innerHTML = `<option value="">-- Select Branch --</option>` + 
-    data.map(branch => `<option value="${branch.id}">${branch.name} (${branch.code})</option>`).join('');
-}
-
-async function loadStudentsList() {
-  const tableBody = document.getElementById('students-table-body');
-  if (!tableBody) return;
-
-  const { data, error } = await supabase
-    .from('students')
-    .select('*, academies(name, code)')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    tableBody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500">Error: ${error.message}</td></tr>`;
-    return;
-  }
-
-  allStudentsCache = data || [];
-  renderStudentsTable(allStudentsCache);
-}
-
-function renderStudentsTable(students) {
-  const tableBody = document.getElementById('students-table-body');
-  if (!tableBody) return;
-
-  if (students.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-gray-400">No student records found.</td></tr>`;
-    return;
-  }
-
-  tableBody.innerHTML = students.map(student => `
-    <tr class="border-b hover:bg-gray-50">
-      <td class="p-3"><span class="bg-gray-100 text-gray-800 text-xs px-2 py-1 rounded-md font-mono border">${student.roll_number}</span></td>
-      <td class="p-3 font-medium text-gray-800">${student.full_name}</td>
-      <td class="p-3 text-xs"><span class="bg-emerald-50 text-emerald-700 px-2 py-1 rounded border border-emerald-200">${student.academies ? student.academies.name : 'N/A'}</span></td>
-      <td class="p-3">${student.class_grade || '<span class="text-gray-400">-</span>'}</td>
-      <td class="p-3 text-xs text-gray-500">${student.guardian_phone || '<span class="text-gray-400">-</span>'}</td>
-    </tr>
-  `).join('');
-}
-
-function filterStudents() {
-  const query = document.getElementById('student-search-input').value.toLowerCase();
-  const filtered = allStudentsCache.filter(s => 
-    s.full_name.toLowerCase().includes(query) || 
-    s.roll_number.toLowerCase().includes(query)
-  );
-  renderStudentsTable(filtered);
 }
 
 async function saveStudent(event) {
   event.preventDefault();
-
-  const academyId = document.getElementById('student-academy-select').value;
-  const fullName = document.getElementById('student-name').value.trim();
-  const rollNumber = document.getElementById('student-roll').value.trim();
-  const classGrade = document.getElementById('student-grade').value.trim();
-  const guardianPhone = document.getElementById('student-phone').value.trim();
-
-  if (!academyId) {
-    alert("Please select a branch / academy.");
-    return;
-  }
+  const academyId = document.getElementById('student-academy-select')?.value;
+  const fullName = document.getElementById('student-name')?.value.trim();
+  const rollNo = document.getElementById('student-roll')?.value.trim();
+  const grade = document.getElementById('student-grade')?.value.trim();
+  const phone = document.getElementById('student-phone')?.value.trim();
 
   const btn = document.getElementById('save-student-btn');
-  btn.innerText = "Saving...";
+  btn.innerText = "Enrolling...";
   btn.disabled = true;
 
   const { error } = await supabase.from('students').insert([{
-    academy_id: academyId,
+    academy_id: academyId || null,
     full_name: fullName,
-    roll_number: rollNumber,
-    class_grade: classGrade,
-    guardian_phone: guardianPhone
+    roll_number: rollNo,
+    grade_class: grade,
+    guardian_phone: phone
   }]);
 
   btn.innerText = "Enroll Student";
   btn.disabled = false;
 
   if (error) {
-    alert("Error enrolling student: " + error.message);
+    alert("Failed to enroll student: " + error.message);
   } else {
     alert("Student enrolled successfully!");
-    document.getElementById('student-name').value = '';
-    document.getElementById('student-roll').value = '';
-    document.getElementById('student-grade').value = '';
-    document.getElementById('student-phone').value = '';
-    loadStudentsList();
+    event.target.reset();
+    fetchStudentsRoster();
+  }
+  return false;
+}
+
+function filterStudents() {
+  const q = document.getElementById('student-search-input')?.value.toLowerCase() || '';
+  const rows = document.querySelectorAll('#students-table-body tr');
+  rows.forEach(r => {
+    r.style.display = r.innerText.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+// --- 6. STAFF.HTML (STAFF DIRECTORY & AUTOMATED PAYROLL ENGINE) ---
+async function loadStaffPage() {
+  await checkAuth();
+  await populateStaffDropdown('salary-staff-select');
+  await fetchPayrollLedger();
+}
+
+async function fetchPayrollLedger() {
+  const tbody = document.getElementById('payroll-ledger-body');
+  if (!tbody) return;
+
+  const { data, error } = await supabase
+    .from('salary_payments')
+    .select('*, staff(full_name, designation)')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-red-500">Error loading ledger.</td></tr>`;
+    return;
+  }
+
+  if (!data || data.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="p-4 text-gray-400 text-center">No payroll records found.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = data.map(sp => `
+    <tr class="border-b hover:bg-gray-50 transition text-sm">
+      <td class="p-4 font-mono font-bold text-gray-800">${sp.transaction_ref}</td>
+      <td class="p-4">
+        <div class="font-medium text-gray-900">${sp.staff?.full_name || 'N/A'}</div>
+        <div class="text-xs text-gray-400">${sp.staff?.designation || 'Employee'}</div>
+      </td>
+      <td class="p-4 text-gray-600">${sp.pay_period}</td>
+      <td class="p-4 font-mono font-bold text-emerald-700">$${parseFloat(sp.amount).toFixed(2)}</td>
+      <td class="p-4 text-center">
+        <button onclick='previewPayslip(${JSON.stringify(sp).replace(/'/g, "&apos;")})' class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded text-xs">
+          View Slip
+        </button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function processSalaryPayment(event) {
+  event.preventDefault();
+
+  const staffId = document.getElementById('salary-staff-select')?.value;
+  const payPeriod = document.getElementById('salary-period')?.value.trim();
+  const salaryAmount = parseFloat(document.getElementById('salary-amount')?.value) || 0;
+
+  if (!staffId || salaryAmount <= 0) {
+    alert("Please enter a valid staff member and amount.");
+    return false;
+  }
+
+  const btn = document.getElementById('process-salary-btn');
+  btn.innerText = "Processing...";
+  btn.disabled = true;
+
+  const txRef = `PAY-${Date.now().toString().slice(-6)}`;
+
+  try {
+    // 1. Create linked expense entry
+    const { data: expense, error: expError } = await supabase.from('expenses').insert([{
+      category: 'Staff Salary',
+      amount: salaryAmount,
+      reference_no: txRef,
+      description: `Salary disalance for ${payPeriod}`
+    }]).select().single();
+
+    if (expError) throw expError;
+
+    // 2. Log payroll payment
+    const { error: salError } = await supabase.from('salary_payments').insert([{
+      staff_id: staffId,
+      expense_id: expense ? expense.id : null,
+      transaction_ref: txRef,
+      pay_period: payPeriod,
+      amount: salaryAmount
+    }]);
+
+    if (salError) throw salError;
+
+    alert(`Salary successfully processed!\nTx Reference: ${txRef}`);
+    toggleModal('paySalaryModal', false);
+    fetchPayrollLedger();
+  } catch (err) {
+    alert("Payroll Processing Error: " + err.message);
+  } finally {
+    btn.innerText = "Pay & Auto-Generate Expense";
+    btn.disabled = false;
+  }
+  return false;
+}
+
+function previewPayslip(sp) {
+  document.getElementById('ps-tx-ref').innerText = sp.transaction_ref;
+  document.getElementById('ps-period').innerText = sp.pay_period;
+  document.getElementById('ps-staff-name').innerText = sp.staff?.full_name || 'N/A';
+  document.getElementById('ps-staff-role').innerText = sp.staff?.designation || 'Staff Member';
+  document.getElementById('ps-amount').innerText = `$${parseFloat(sp.amount).toFixed(2)}`;
+
+  const slipContainer = document.getElementById('printable-payslip');
+  if (slipContainer) {
+    slipContainer.classList.remove('hidden');
+    slipContainer.scrollIntoView({ behavior: 'smooth' });
   }
 }
 
-// ==========================================
-// 7. FEE VOUCHERS
-// ==========================================
+// --- 7. FINANCE.HTML (FEE VOUCHERS & RECEIPT PRINTING) ---
 async function loadStudentDropdownForVoucher() {
   const select = document.getElementById('voucher-student-select');
   if (!select) return;
 
-  const { data, error } = await supabase
-    .from('students')
-    .select('id, full_name, roll_number, academy_id, academies(name)')
-    .order('full_name');
-
-  if (error || !data || data.length === 0) {
-    select.innerHTML = `<option value="">No students available</option>`;
+  const { data } = await supabase.from('students').select('id, full_name, roll_number');
+  if (!data || data.length === 0) {
+    select.innerHTML = '<option value="">No students available</option>';
     return;
   }
 
-  select.innerHTML = `<option value="">-- Select Student --</option>` + 
-    data.map(s => `<option value="${s.id}" data-academy="${s.academy_id}">${s.full_name} (${s.roll_number}) - ${s.academies ? s.academies.name : ''}</option>`).join('');
+  select.innerHTML = '<option value="">Select Student...</option>' + 
+    data.map(s => `<option value="${s.id}">${s.full_name} (${s.roll_number || 'No Roll #'})</option>`).join('');
 }
 
 function updateTotalFee() {
-  const tuition = parseFloat(document.getElementById('voucher-tuition').value) || 0;
-  const other = parseFloat(document.getElementById('voucher-other').value) || 0;
-  const total = tuition + other;
-  
+  const tuition = parseFloat(document.getElementById('voucher-tuition')?.value) || 0;
+  const other = parseFloat(document.getElementById('voucher-other')?.value) || 0;
   const display = document.getElementById('voucher-total-display');
-  if (display) display.innerText = `$${total.toFixed(2)}`;
+  if (display) display.innerText = `$${(tuition + other).toFixed(2)}`;
 }
 
 async function saveVoucher(event) {
   event.preventDefault();
-
-  const studentSelect = document.getElementById('voucher-student-select');
-  const studentId = studentSelect.value;
-  const selectedOption = studentSelect.options[studentSelect.selectedIndex];
-  const academyId = selectedOption ? selectedOption.getAttribute('data-academy') : null;
-
-  const issueDate = document.getElementById('voucher-issue-date').value;
-  const dueDate = document.getElementById('voucher-due-date').value;
-  const tuitionFee = parseFloat(document.getElementById('voucher-tuition').value) || 0;
-  const otherFee = parseFloat(document.getElementById('voucher-other').value) || 0;
-  const totalAmount = tuitionFee + otherFee;
-
-  if (!studentId || !academyId) {
-    alert("Please select a valid student.");
-    return;
-  }
+  const studentId = document.getElementById('voucher-student-select')?.value;
+  const issueDate = document.getElementById('voucher-issue-date')?.value;
+  const dueDate = document.getElementById('voucher-due-date')?.value;
+  const tuition = parseFloat(document.getElementById('voucher-tuition')?.value) || 0;
+  const other = parseFloat(document.getElementById('voucher-other')?.value) || 0;
+  const total = tuition + other;
 
   const btn = document.getElementById('save-voucher-btn');
-  btn.innerText = "Generating...";
+  btn.innerText = "Creating...";
   btn.disabled = true;
 
   const voucherNo = `VCH-${Date.now().toString().slice(-6)}`;
@@ -421,88 +371,86 @@ async function saveVoucher(event) {
   const { error } = await supabase.from('vouchers').insert([{
     voucher_no: voucherNo,
     student_id: studentId,
-    academy_id: academyId,
     issue_date: issueDate,
     due_date: dueDate,
-    tuition_fee: tuitionFee,
-    other_fee: otherFee,
-    total_amount: totalAmount,
+    tuition_fee: tuition,
+    other_charges: other,
+    total_amount: total,
     status: 'Unpaid'
   }]);
 
-  btn.innerText = "Generate Voucher";
+  btn.innerText = "Issue Voucher";
   btn.disabled = false;
 
   if (error) {
     alert("Error creating voucher: " + error.message);
   } else {
-    alert(`Voucher ${voucherNo} generated!`);
-    document.getElementById('voucher-tuition').value = '';
-    document.getElementById('voucher-other').value = '';
-    updateTotalFee();
-    loadVouchersList();
+    alert("Voucher issued successfully!");
+    toggleModal('generateVoucherModal', false);
+    if (typeof fetchVouchers === 'function') fetchVouchers();
   }
+  return false;
 }
 
-async function loadVouchersList() {
-  const tableBody = document.getElementById('vouchers-table-body');
-  if (!tableBody) return;
-
-  const { data, error } = await supabase
-    .from('vouchers')
-    .select('*, students(full_name, roll_number), academies(name, finance_person_name, finance_person_email, finance_person_phone)')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    tableBody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-red-500">Error: ${error.message}</td></tr>`;
-    return;
-  }
-
-  if (!data || data.length === 0) {
-    tableBody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-gray-400">No vouchers generated yet.</td></tr>`;
-    return;
-  }
-
-  tableBody.innerHTML = data.map(v => `
-    <tr class="border-b hover:bg-gray-50">
-      <td class="p-3 font-mono font-semibold text-indigo-600">${v.voucher_no}</td>
-      <td class="p-3 font-medium text-gray-800">${v.students ? v.students.full_name : 'N/A'}</td>
-      <td class="p-3 text-xs text-gray-500">${v.academies ? v.academies.name : 'N/A'}</td>
-      <td class="p-3 text-xs text-red-600">${v.due_date}</td>
-      <td class="p-3 font-mono font-bold">$${parseFloat(v.total_amount).toFixed(2)}</td>
-      <td class="p-3 text-center">
-        <button onclick='previewVoucher(${JSON.stringify(v).replace(/'/g, "&apos;")})' class="bg-blue-100 text-blue-700 px-3 py-1 rounded text-xs hover:bg-blue-200">
-          View & Print
-        </button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-function previewVoucher(voucher) {
-  document.getElementById('pv-voucher-no').innerText = voucher.voucher_no;
-  document.getElementById('pv-branch-name').innerText = voucher.academies ? voucher.academies.name : '';
-  document.getElementById('pv-student-name').innerText = voucher.students ? voucher.students.full_name : '-';
-  document.getElementById('pv-roll-no').innerText = voucher.students ? voucher.students.roll_number : '-';
-  document.getElementById('pv-issue-date').innerText = voucher.issue_date;
-  document.getElementById('pv-due-date').innerText = voucher.due_date;
-  document.getElementById('pv-tuition').innerText = `$${parseFloat(voucher.tuition_fee).toFixed(2)}`;
-  document.getElementById('pv-other').innerText = `$${parseFloat(voucher.other_fee).toFixed(2)}`;
-  document.getElementById('pv-total').innerText = `$${parseFloat(voucher.total_amount).toFixed(2)}`;
-
-  if (voucher.academies) {
-    const name = voucher.academies.finance_person_name || 'Finance Dept';
-    const email = voucher.academies.finance_person_email || '';
-    const phone = voucher.academies.finance_person_phone || '';
-    document.getElementById('pv-finance-info').innerText = `${name} | ${email} ${phone}`;
-  }
+function previewVoucher(v) {
+  document.getElementById('pv-voucher-no').innerText = v.voucher_no;
+  document.getElementById('pv-student-name').innerText = v.students?.full_name || 'N/A';
+  document.getElementById('pv-roll-no').innerText = v.students?.roll_number || '-';
+  document.getElementById('pv-issue-date').innerText = v.issue_date;
+  document.getElementById('pv-due-date').innerText = v.due_date;
+  document.getElementById('pv-tuition').innerText = `$${parseFloat(v.tuition_fee || 0).toFixed(2)}`;
+  document.getElementById('pv-other').innerText = `$${parseFloat(v.other_charges || 0).toFixed(2)}`;
+  document.getElementById('pv-total').innerText = `$${parseFloat(v.total_amount || 0).toFixed(2)}`;
 
   const wrapper = document.getElementById('printable-voucher-wrapper');
-  wrapper.classList.remove('hidden');
-  wrapper.scrollIntoView({ behavior: 'smooth' });
+  if (wrapper) {
+    wrapper.classList.remove('hidden');
+    wrapper.scrollIntoView({ behavior: 'smooth' });
+  }
 }
 
-// ==========================================
-// 8. AUTO-EXECUTE AUTH CHECK ON SCRIPT LOAD
-// ==========================================
-checkAuthPage();
+// --- 8. SHARED UTILITIES ---
+async function populateAcademyDropdown(elementId) {
+  const select = document.getElementById(elementId);
+  if (!select) return;
+
+  const { data } = await supabase.from('academies').select('id, name');
+  if (!data || data.length === 0) {
+    select.innerHTML = '<option value="">Main Branch</option>';
+    return;
+  }
+  select.innerHTML = data.map(a => `<option value="${a.id}">${a.name}</option>`).join('');
+}
+
+async function populateStaffDropdown(elementId) {
+  const select = document.getElementById(elementId);
+  if (!select) return;
+
+  const { data } = await supabase.from('staff').select('id, full_name, designation');
+  if (!data || data.length === 0) {
+    select.innerHTML = '<option value="">No staff registered</option>';
+    return;
+  }
+  select.innerHTML = '<option value="">Select Employee...</option>' + 
+    data.map(st => `<option value="${st.id}">${st.full_name} (${st.designation || 'Staff'})</option>`).join('');
+}
+
+function toggleModal(id, show) {
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  if (show) modal.classList.remove('hidden');
+  else modal.classList.add('hidden');
+}
+
+// --- 9. AUTOMATIC ROUTE INITIALIZER ---
+document.addEventListener('DOMContentLoaded', () => {
+  const path = window.location.pathname;
+
+  if (path.endsWith('dashboard.html')) {
+    loadExecutiveDashboard();
+  } else if (path.endsWith('students.html')) {
+    loadStudentsPage();
+  } else if (path.endsWith('staff.html')) {
+    loadStaffPage();
+  }
+});
