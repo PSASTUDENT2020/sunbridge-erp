@@ -5,7 +5,7 @@ const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE
 
 // Login Logic
 async function login() {
-  const email = document.getElementById('email').value;
+  const email = document.getElementById('email').value.trim();
   const password = document.getElementById('password').value;
 
   if (!email || !password) {
@@ -30,20 +30,34 @@ async function logout() {
 
 // Check Authentication Session on Load
 async function checkAuth() {
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
   
+  if (sessionError) {
+    console.error("Session fetch error:", sessionError.message);
+    return;
+  }
+
   if (session) {
-    // Fetch profile role mapping
-    const { data: profile } = await supabase
+    // Safely attempt to fetch profile without throwing single-row errors
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', session.user.id)
-      .single();
+      .maybeSingle();
+
+    if (profileError) {
+      console.warn("Profile fetch warning:", profileError.message);
+    }
 
     document.getElementById('login-box').classList.add('hidden');
     document.getElementById('admin-box').classList.remove('hidden');
-    document.getElementById('user-info').innerText = profile ? profile.full_name : session.user.email;
-    document.getElementById('role-info').innerText = `Role: ${profile ? profile.role : 'User'}`;
+    
+    // Display profile details or fallback to auth metadata
+    const displayName = profile?.full_name || session.user.user_metadata?.full_name || session.user.email;
+    const displayRole = profile?.role || 'Super Admin';
+
+    document.getElementById('user-info').innerText = displayName;
+    document.getElementById('role-info').innerText = `Role: ${displayRole}`;
     
     loadAcademies();
   }
@@ -54,6 +68,10 @@ async function loadAcademies() {
   const { data: academies, error } = await supabase.from('academies').select('*');
   const listElement = document.getElementById('academy-list');
   const selectElement = document.getElementById('branch-select');
+
+  if (error) {
+    console.error("Error loading academies:", error.message);
+  }
 
   listElement.innerHTML = '';
   selectElement.innerHTML = '<option value="">Select Target Branch...</option>';
